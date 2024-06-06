@@ -50,9 +50,12 @@ struct IndexTemplate {
 }
 
 #[get("/")]
-pub async fn index_handler(pool: web::Data<PgPool>) -> Result<HttpResponse, UptimersError> {
+pub async fn index_handler(
+    sites: web::Data<Vec<String>>,
+    pool: web::Data<PgPool>,
+) -> Result<HttpResponse, UptimersError> {
     // Select the most recent timestamps from each site
-    let sites = sqlx::query_as!(
+    let status = sqlx::query_as!(
         SiteFactModel,
         r#"SELECT
             site,
@@ -60,15 +63,18 @@ pub async fn index_handler(pool: web::Data<PgPool>) -> Result<HttpResponse, Upti
             success,
             status_code
         FROM site_fact s1
-        WHERE tstamp =
-            (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)
+        WHERE
+            site = ANY($1)
+        AND
+            tstamp = (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)
         ORDER BY site, tstamp;"#,
+        sites.as_ref(),
     )
     .fetch_all(pool.as_ref())
     .await?;
 
-    debug!("{:?}", sites);
-    let index = IndexTemplate { sites };
+    debug!("{:?}", status);
+    let index = IndexTemplate { sites: status };
     Ok(HttpResponse::Ok()
         .content_type("text/html")
         .body(index.render()?))
@@ -151,6 +157,8 @@ async fn main() -> Result<(), UptimersError> {
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
+    // Both these use Arc internally, so clones are cheap
+    let sites = web::Data::new(config.sites);
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&format!(
@@ -162,7 +170,7 @@ async fn main() -> Result<(), UptimersError> {
 
     // Spawn background loop to check on all user-supplied URLs every minute
     actix_web::rt::spawn({
-        let sites = config.sites;
+        let sites = sites.clone();
         let client = Client::new();
         let pool = pool.clone();
         async move {
@@ -179,6 +187,7 @@ async fn main() -> Result<(), UptimersError> {
     Ok(HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
+            .app_data(sites.clone())
             .app_data(web::Data::new(pool.clone()))
             .service(index_handler)
     })

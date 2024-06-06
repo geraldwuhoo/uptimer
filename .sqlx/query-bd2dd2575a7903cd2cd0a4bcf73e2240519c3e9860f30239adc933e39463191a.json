@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            site,\n            tstamp,\n            success,\n            status_code\n        FROM site_fact s1\n        WHERE tstamp =\n            (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)\n        ORDER BY site, tstamp;",
+  "query": "SELECT\n            site,\n            tstamp,\n            success,\n            status_code\n        FROM site_fact s1\n        WHERE\n            site = ANY($1)\n        AND\n            tstamp = (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)\n        ORDER BY site, tstamp;",
   "describe": {
     "columns": [
       {
@@ -25,7 +25,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "TextArray"
+      ]
     },
     "nullable": [
       false,
@@ -34,5 +36,5 @@
       false
     ]
   },
-  "hash": "fa1ccae8b36bfb3b1f50fc748bea552f558b35d512881651eaf88b077ed9bcec"
+  "hash": "bd2dd2575a7903cd2cd0a4bcf73e2240519c3e9860f30239adc933e39463191a"
 }
