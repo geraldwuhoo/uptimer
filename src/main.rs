@@ -2,34 +2,16 @@ mod structures;
 
 use std::{fs::File, io::BufReader, time::Duration};
 
-use actix_web::{get, middleware::Logger, web, App, HttpResponse, HttpServer};
+use actix_web::{get, middleware::Logger, rt::time::sleep, web, App, HttpResponse, HttpServer};
 use askama::Template;
 use clap::{command, Parser};
-use futures::{stream, StreamExt};
-use log::{info, warn};
+use futures::{stream, StreamExt, TryStreamExt};
+use log::{debug, error, info, warn};
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
+use sqlx::{postgres::PgPoolOptions, PgPool};
 
-use crate::structures::errors::UptimersError;
-
-#[derive(Debug, Template)]
-#[template(path = "index.html")]
-struct IndexTemplate<'a> {
-    status: Vec<(&'a str, StatusCode, bool)>,
-}
-
-#[get("/")]
-pub async fn index_handler(
-    sites: web::Data<Vec<String>>,
-    client: web::Data<Client>,
-) -> Result<HttpResponse, UptimersError> {
-    let status = connect_sites(&client, &sites).await;
-    info!("{:?}", status);
-    let index = IndexTemplate { status };
-    Ok(HttpResponse::Ok()
-        .content_type("text/html")
-        .body(index.render()?))
-}
+use crate::structures::{errors::UptimersError, model::SiteFactModel};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,19 +22,75 @@ struct Config {
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Postgres username
+    #[arg(long, env, default_value = "uptimers")]
+    postgres_username: String,
+
+    /// Postgres password
+    #[arg(long, env, default_value = "password")]
+    postgres_password: String,
+
+    /// Postgres host
+    #[arg(long, env, default_value = "localhost")]
+    postgres_host: String,
+
+    /// Postgres DB name
+    #[arg(long, env, default_value = "uptimers")]
+    postgres_db: String,
+
     /// path to config file
     #[arg(long, env, default_value = "./config.yaml")]
     config_path: String,
 }
 
-async fn connect_sites<'a>(
-    client: &'a Client,
-    sites: &'a Vec<String>,
-) -> Vec<(&'a str, StatusCode, bool)> {
+#[derive(Debug, Template)]
+#[template(path = "index.html")]
+struct IndexTemplate {
+    sites: Vec<SiteFactModel>,
+}
+
+#[get("/")]
+pub async fn index_handler(pool: web::Data<PgPool>) -> Result<HttpResponse, UptimersError> {
+    // Select the most recent timestamps from each site
+    let sites = sqlx::query_as!(
+        SiteFactModel,
+        r#"SELECT
+            site,
+            tstamp,
+            success,
+            status_code
+        FROM site_fact s1
+        WHERE tstamp =
+            (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)
+        ORDER BY site, tstamp;"#,
+    )
+    .fetch_all(pool.as_ref())
+    .await?;
+
+    debug!("{:?}", sites);
+    let index = IndexTemplate { sites };
+    Ok(HttpResponse::Ok()
+        .content_type("text/html")
+        .body(index.render()?))
+}
+
+async fn connect_sites(
+    sites: &Vec<String>,
+    client: &Client,
+    pool: &PgPool,
+) -> Result<(), UptimersError> {
+    // Truncate the current timestamp to minute accuracy
+    let now = time::OffsetDateTime::now_utc()
+        .replace_nanosecond(0)
+        .unwrap()
+        .replace_second(0)
+        .unwrap();
+
+    // Connect to all user-supplied URLs and write results into the database
     stream::iter(sites)
         // Attempt to connect to all URLs
         .map(|url| async move {
-            match client
+            let status_code = match client
                 .get(url)
                 .timeout(Duration::from_secs(10))
                 .send()
@@ -61,16 +99,44 @@ async fn connect_sites<'a>(
                 Ok(response) => {
                     let status = response.status();
                     info!("Connected to {}: {}", url, status);
-                    (url.as_str(), status, status.is_success())
+                    status
                 }
                 Err(e) => {
                     warn!("Failed to connect to {}: {}", url, e);
-                    (url.as_str(), StatusCode::INTERNAL_SERVER_ERROR, false)
+                    StatusCode::BAD_GATEWAY
                 }
-            }
+            };
+            Ok::<SiteFactModel, UptimersError>(SiteFactModel {
+                site: url.to_string(),
+                tstamp: now,
+                success: status_code.is_success(),
+                status_code: status_code.as_u16() as i16,
+            })
         })
+        // Run 10 parallel at a time
         .buffered(10)
-        .collect::<Vec<(&str, StatusCode, bool)>>()
+        // Try to update the DB with the connection data
+        .try_for_each_concurrent(5, |site| async move {
+            sqlx::query_as!(
+                SiteFactModel,
+                r#"INSERT INTO site_fact(
+                        site,
+                        tstamp,
+                        success,
+                        status_code
+                    )
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (site, tstamp)
+                    DO NOTHING"#,
+                site.site,
+                site.tstamp,
+                site.success,
+                site.status_code,
+            )
+            .execute(pool)
+            .await?;
+            Ok(())
+        })
         .await
 }
 
@@ -81,27 +147,39 @@ async fn main() -> Result<(), UptimersError> {
 
     info!("Reading config from {}", args.config_path);
     let config: Config = serde_yaml::from_reader(BufReader::new(File::open(&args.config_path)?))?;
+    debug!("Config: {:?}", config);
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    let sites = config.sites;
-    let client = Client::new();
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&format!(
+            "postgres://{}:{}@{}/{}",
+            args.postgres_username, args.postgres_password, args.postgres_host, args.postgres_db,
+        ))
+        .await?;
+    sqlx::migrate!().run(&pool).await?;
 
-    // Soon...
-    // actix_web::rt::spawn(async move {
-    //     loop {
-    //         let l = connect_sites(&client, &sites).await;
-    //         println!("{:?}", l);
+    // Spawn background loop to check on all user-supplied URLs every minute
+    actix_web::rt::spawn({
+        let sites = config.sites;
+        let client = Client::new();
+        let pool = pool.clone();
+        async move {
+            loop {
+                if let Err(e) = connect_sites(&sites, &client, &pool).await {
+                    error!("Failed to get site status: {}", e);
+                };
 
-    //         sleep(Duration::from_secs(60)).await;
-    //     }
-    // });
+                sleep(Duration::from_secs(60)).await;
+            }
+        }
+    });
 
     Ok(HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
-            .app_data(web::Data::new(sites.clone()))
-            .app_data(web::Data::new(client.clone()))
+            .app_data(web::Data::new(pool.clone()))
             .service(index_handler)
     })
     .bind(("0.0.0.0", 8080))?

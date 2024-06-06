@@ -32,14 +32,14 @@
         <h1>Uptime</h1>
     </header>
     <main>
-    {% for site in status -%}
+    {% for site in sites -%}
         <p>
-        {% if site.2 -%}
+        {% if site.success -%}
             <span class="big green">&#x2713;</span>
         {% else -%}
             <span class="big red">&#x2717;</span>
         {% endif -%}
-            <a href="{{ site.0 }}">{{ site.0 }}</a>
+            <a href="{{ site.site }}">{{ site.site }}</a>
         </p>
     {% endfor -%}
     </main>

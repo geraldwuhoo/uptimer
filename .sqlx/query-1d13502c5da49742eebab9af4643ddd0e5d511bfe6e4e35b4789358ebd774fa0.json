@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO site_fact(\n                        site,\n                        tstamp,\n                        success,\n                        status_code\n                    )\n                    VALUES ($1, $2, $3, $4)\n                    ON CONFLICT (site, tstamp)\n                    DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Bool",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d13502c5da49742eebab9af4643ddd0e5d511bfe6e4e35b4789358ebd774fa0"
+}

@@ -2,5 +2,7 @@
 
 !src/**
 !templates/**
+!migrations/**
+!.sqlx/**
 !Cargo.toml
 !Cargo.lock

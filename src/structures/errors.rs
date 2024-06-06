@@ -11,6 +11,12 @@ pub enum UptimersError {
     #[error("reqwest error\n{0}")]
     Parse(#[from] reqwest::Error),
 
+    #[error("sqlx error\n{0}")]
+    Sqlx(#[from] sqlx::Error),
+
+    #[error("sqlx migreate error\n{0}")]
+    SqlxMigrate(#[from] sqlx::migrate::MigrateError),
+
     #[error("serde_yaml error\n{0}")]
     SerdeYaml(#[from] serde_yaml::Error),
 }

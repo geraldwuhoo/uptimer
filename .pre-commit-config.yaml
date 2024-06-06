@@ -27,3 +27,6 @@ repos:
       - id: fmt
       - id: cargo-check
       - id: clippy
+      - id: sqlx-prepare
+        name: sqlx prepare check
+        args: ["--check"]
