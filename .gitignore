@@ -1,3 +1,4 @@
 /target
 .direnv
 image.tar
+.env
