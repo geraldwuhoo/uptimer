@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Uptimers</title>
+    <base target="_blank">
+    <style>
+        body {
+            max-width: 60em;
+            margin: 40px auto;
+            padding: 0 2em;
+            font: 18px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            overflow-x: hidden;
+        }
+
+        .big {
+            font-size: larger;
+        }
+        .green {
+            color: green;
+        }
+        .red {
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Uptime</h1>
+    </header>
+    <main>
+    {% for site in status -%}
+        <p>
+        {% if site.2 -%}
+            <span class="big green">&#x2713;</span>
+        {% else -%}
+            <span class="big red">&#x2717;</span>
+        {% endif -%}
+            <a href="{{ site.0 }}">{{ site.0 }}</a>
+        </p>
+    {% endfor -%}
+    </main>
+</body>
+
+</html>
