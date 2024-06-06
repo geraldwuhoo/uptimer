@@ -4,41 +4,44 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Uptimers</title>
+    <title>Uptime.rs</title>
     <base target="_blank">
     <style>
         body {
-            max-width: 60em;
+            max-width: 40em;
             margin: 40px auto;
             padding: 0 2em;
             font: 18px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
             overflow-x: hidden;
         }
 
-        .big {
-            font-size: larger;
+        .button {
+            border-radius: 0.5em;
+            color: white;
+            min-width: 5em;
+            display: inline-block;
+            text-align: center;
+            vertical-align: baseline;
+            padding: .35em .65em;
         }
         .green {
-            color: green;
+            background-color: #5cdd8b;
         }
         .red {
-            color: red;
+            background-color: #dc3545;
         }
     </style>
 </head>
 
 <body>
     <header>
-        <h1>Uptime</h1>
+        <h1>Services</h1>
     </header>
     <main>
     {% for site in sites -%}
         <p>
-        {% if site.success -%}
-            <span class="big green">&#x2713;</span>
-        {% else -%}
-            <span class="big red">&#x2717;</span>
-        {% endif -%}
+            {% let percent = "{:.2}%"|format(100.0 * site.avg.unwrap_or_default()) -%}
+            <span class="button {% if site.success %}green{% else %}red{% endif %}">{{ percent }}</span>
             <a href="{{ site.site }}">{{ site.site }}</a>
         </p>
     {% endfor -%}

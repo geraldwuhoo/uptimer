@@ -11,7 +11,10 @@ use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 
-use crate::structures::{errors::UptimersError, model::SiteFactModel};
+use crate::structures::{
+    errors::UptimersError,
+    model::{SiteFactModel, SiteStatModel},
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,7 +49,7 @@ struct Args {
 #[derive(Debug, Template)]
 #[template(path = "index.html")]
 struct IndexTemplate {
-    sites: Vec<SiteFactModel>,
+    sites: Vec<SiteStatModel>,
 }
 
 #[get("/")]
@@ -54,20 +57,39 @@ pub async fn index_handler(
     sites: web::Data<Vec<String>>,
     pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, UptimersError> {
-    // Select the most recent timestamps from each site
+    // Select the most recent timestamps and 24 hours average uptime from each site
     let status = sqlx::query_as!(
-        SiteFactModel,
+        SiteStatModel,
         r#"SELECT
-            site,
-            tstamp,
-            success,
-            status_code
-        FROM site_fact s1
-        WHERE
-            site = ANY($1)
-        AND
-            tstamp = (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)
-        ORDER BY site, tstamp;"#,
+            t1.site,
+            t1.tstamp,
+            t1.success,
+            t1.status_code,
+            t2.avg
+        FROM (
+            SELECT
+                site,
+                tstamp,
+                success,
+                status_code
+            FROM site_fact s1
+            WHERE
+                tstamp = (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)
+            AND
+                site = ANY($1)
+            ORDER BY site, tstamp
+        ) t1
+        INNER JOIN (
+            SELECT
+                site,
+                AVG(success::int::float)
+            FROM
+                site_fact WHERE tstamp >= (NOW() - INTERVAL '1 day')
+            GROUP BY
+                site
+        ) t2
+        ON
+            t1.site = t2.site;"#,
         sites.as_ref(),
     )
     .fetch_all(pool.as_ref())
