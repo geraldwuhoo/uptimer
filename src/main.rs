@@ -1,6 +1,6 @@
 mod structures;
 
-use std::{fs::File, io::BufReader, time::Duration};
+use std::{fs::File, io::BufReader, sync::RwLock, time::Duration};
 
 use actix_web::{get, middleware::Logger, rt::time::sleep, web, App, HttpResponse, HttpServer};
 use askama::Template;
@@ -53,53 +53,11 @@ struct IndexTemplate {
 }
 
 #[get("/")]
-pub async fn index_handler(
-    sites: web::Data<Vec<String>>,
-    pool: web::Data<PgPool>,
-) -> Result<HttpResponse, UptimersError> {
-    // Select the most recent timestamps and 24 hours average uptime from each site
-    let status = sqlx::query_as!(
-        SiteStatModel,
-        r#"SELECT
-            t1.site,
-            t1.tstamp,
-            t1.success,
-            t1.status_code,
-            t2.avg
-        FROM (
-            SELECT
-                site,
-                tstamp,
-                success,
-                status_code
-            FROM site_fact s1
-            WHERE
-                tstamp = (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)
-            AND
-                site = ANY($1)
-            ORDER BY site, tstamp
-        ) t1
-        INNER JOIN (
-            SELECT
-                site,
-                AVG(success::int::float)
-            FROM
-                site_fact WHERE tstamp >= (NOW() - INTERVAL '1 day')
-            GROUP BY
-                site
-        ) t2
-        ON
-            t1.site = t2.site;"#,
-        sites.as_ref(),
-    )
-    .fetch_all(pool.as_ref())
-    .await?;
-
-    debug!("{:?}", status);
-    let index = IndexTemplate { sites: status };
-    Ok(HttpResponse::Ok()
-        .content_type("text/html")
-        .body(index.render()?))
+pub async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpResponse, UptimersError> {
+    debug!("Acquiring read lock on the shared pre-generated page");
+    let page = (*page.read().unwrap()).clone();
+    debug!("Acquired read lock");
+    Ok(HttpResponse::Ok().content_type("text/html").body(page))
 }
 
 async fn connect_sites(
@@ -168,6 +126,62 @@ async fn connect_sites(
         .await
 }
 
+async fn render_page(
+    sites: &Vec<String>,
+    page: &RwLock<String>,
+    pool: &PgPool,
+) -> Result<(), UptimersError> {
+    // Select the most recent timestamps and 24 hours average uptime from each site
+    let status = sqlx::query_as!(
+        SiteStatModel,
+        r#"SELECT
+            t1.site,
+            t1.tstamp,
+            t1.success,
+            t1.status_code,
+            t2.avg
+        FROM (
+            SELECT
+                site,
+                tstamp,
+                success,
+                status_code
+            FROM site_fact s1
+            WHERE
+                tstamp = (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)
+            AND
+                site = ANY($1)
+            ORDER BY site, tstamp
+        ) t1
+        INNER JOIN (
+            SELECT
+                site,
+                AVG(success::int::float)
+            FROM
+                site_fact WHERE tstamp >= (NOW() - INTERVAL '1 day')
+            GROUP BY
+                site
+        ) t2
+        ON
+            t1.site = t2.site;"#,
+        sites,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    debug!("{:?}", status);
+    let index = IndexTemplate { sites: status };
+    // Update the page string reference shared with the index_handler thread
+    {
+        debug!("Acquiring write lock to update the pre-generated status page");
+        let mut p = page.write().unwrap();
+        *p = index.render()?;
+    }
+    debug!("Released write lock");
+
+    Ok(())
+}
+
 #[actix_web::main]
 async fn main() -> Result<(), UptimersError> {
     let args = Args::parse();
@@ -179,8 +193,9 @@ async fn main() -> Result<(), UptimersError> {
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    // Both these use Arc internally, so clones are cheap
+    // web::Data and PgPool use Arc internally, so clones are cheap and usage is threadsafe
     let sites = web::Data::new(config.sites);
+    let page = web::Data::new(RwLock::new("".to_string())); // Pass around a pre-rendered template rather than rendering on every request
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&format!(
@@ -193,12 +208,17 @@ async fn main() -> Result<(), UptimersError> {
     // Spawn background loop to check on all user-supplied URLs every minute
     actix_web::rt::spawn({
         let sites = sites.clone();
+        let page = page.clone();
         let client = Client::new();
         let pool = pool.clone();
         async move {
             loop {
                 if let Err(e) = connect_sites(&sites, &client, &pool).await {
                     error!("Failed to get site status: {}", e);
+                };
+
+                if let Err(e) = render_page(&sites, &page, &pool).await {
+                    error!("Failed to render status page: {}", e);
                 };
 
                 sleep(Duration::from_secs(60)).await;
@@ -210,6 +230,7 @@ async fn main() -> Result<(), UptimersError> {
         App::new()
             .wrap(Logger::default())
             .app_data(sites.clone())
+            .app_data(page.clone())
             .app_data(web::Data::new(pool.clone()))
             .service(index_handler)
     })

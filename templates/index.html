@@ -18,15 +18,17 @@
         .button {
             border-radius: 0.5em;
             color: white;
-            min-width: 5em;
             display: inline-block;
+            min-width: 5em;
+            padding: .35em .65em;
             text-align: center;
             vertical-align: baseline;
-            padding: .35em .65em;
         }
+
         .green {
             background-color: #5cdd8b;
         }
+
         .red {
             background-color: #dc3545;
         }
@@ -38,13 +40,13 @@
         <h1>Services</h1>
     </header>
     <main>
-    {% for site in sites -%}
+        {% for site in sites -%}
         <p>
             {% let percent = "{:.2}%"|format(100.0 * site.avg.unwrap_or_default()) -%}
             <span class="button {% if site.success %}green{% else %}red{% endif %}">{{ percent }}</span>
             <a href="{{ site.site }}">{{ site.site }}</a>
         </p>
-    {% endfor -%}
+        {% endfor -%}
     </main>
 </body>
 
