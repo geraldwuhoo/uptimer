@@ -60,6 +60,39 @@ pub async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpRespon
     Ok(HttpResponse::Ok().content_type("text/html").body(page))
 }
 
+async fn connect_site(client: &Client, url: &String) -> StatusCode {
+    let mut status_code = StatusCode::BAD_GATEWAY;
+    let max_attempts = 5;
+    for attempt in 0..max_attempts {
+        match client
+            .get(url)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let status = response.status();
+                info!("Connected to {}: {}", url, status);
+                status_code = status;
+                break;
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to connect to {}: {} (attempt {} out of {})",
+                    url,
+                    e,
+                    attempt + 1,
+                    max_attempts
+                );
+                if attempt + 1 < max_attempts {
+                    sleep(Duration::from_secs(attempt + 1)).await;
+                }
+            }
+        };
+    }
+    status_code
+}
+
 async fn connect_sites(
     sites: &Vec<SiteModel>,
     client: &Client,
@@ -71,28 +104,15 @@ async fn connect_sites(
         .unwrap()
         .replace_second(0)
         .unwrap();
+    debug!("Connecting to sites with timestamp {}", now);
 
     // Connect to all user-supplied URLs and write results into the database
     stream::iter(sites)
         // Attempt to connect to all URLs
         .map(|site| async move {
             let url = &site.site;
-            let status_code = match client
-                .get(url)
-                .timeout(Duration::from_secs(10))
-                .send()
-                .await
-            {
-                Ok(response) => {
-                    let status = response.status();
-                    info!("Connected to {}: {}", url, status);
-                    status
-                }
-                Err(e) => {
-                    warn!("Failed to connect to {}: {}", url, e);
-                    StatusCode::BAD_GATEWAY
-                }
-            };
+            debug!("Attempting to connect to {}", url);
+            let status_code = connect_site(client, url).await;
             Ok::<SiteFullModel, UptimersError>(SiteFullModel {
                 site: url.to_string(),
                 name: site.name.clone(),
@@ -101,11 +121,11 @@ async fn connect_sites(
                 status_code: status_code.as_u16() as i16,
             })
         })
-        // Run 10 parallel at a time
-        .buffered(10)
+        // Run 5 parallel at a time
+        .buffer_unordered(5)
         // Try to update the DB with the connection data
         .try_for_each_concurrent(5, |site| async move {
-            // Insert new timestamp data into DB
+            debug!("Writing timestamp data into DB: {}", site.site);
             sqlx::query!(
                 r#"INSERT INTO site_fact(
                         site,
@@ -123,7 +143,8 @@ async fn connect_sites(
             )
             .execute(pool)
             .await?;
-            // Insert/update site data into DB
+
+            debug!("Writing site data into DB: {}", site.site);
             sqlx::query!(
                 r#"INSERT INTO site(
                         site,
@@ -138,6 +159,7 @@ async fn connect_sites(
             )
             .execute(pool)
             .await?;
+
             Ok(())
         })
         .await
@@ -190,7 +212,9 @@ async fn render_page(
                 site
         ) t3
         ON
-            t1.site = t3.site;"#,
+            t1.site = t3.site
+        ORDER BY
+            t3.name;"#,
         &sites
             .into_iter()
             .map(|site| site.site.clone())
