@@ -13,13 +13,13 @@ use sqlx::{postgres::PgPoolOptions, PgPool};
 
 use crate::structures::{
     errors::UptimersError,
-    model::{SiteFactModel, SiteStatModel},
+    model::{SiteFullModel, SiteModel, SiteStatModel},
 };
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
-    sites: Vec<String>,
+    sites: Vec<SiteModel>,
 }
 
 #[derive(Debug, Parser)]
@@ -61,7 +61,7 @@ pub async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpRespon
 }
 
 async fn connect_sites(
-    sites: &Vec<String>,
+    sites: &Vec<SiteModel>,
     client: &Client,
     pool: &PgPool,
 ) -> Result<(), UptimersError> {
@@ -75,7 +75,8 @@ async fn connect_sites(
     // Connect to all user-supplied URLs and write results into the database
     stream::iter(sites)
         // Attempt to connect to all URLs
-        .map(|url| async move {
+        .map(|site| async move {
+            let url = &site.site;
             let status_code = match client
                 .get(url)
                 .timeout(Duration::from_secs(10))
@@ -92,8 +93,9 @@ async fn connect_sites(
                     StatusCode::BAD_GATEWAY
                 }
             };
-            Ok::<SiteFactModel, UptimersError>(SiteFactModel {
+            Ok::<SiteFullModel, UptimersError>(SiteFullModel {
                 site: url.to_string(),
+                name: site.name.clone(),
                 tstamp: now,
                 success: status_code.is_success(),
                 status_code: status_code.as_u16() as i16,
@@ -103,8 +105,8 @@ async fn connect_sites(
         .buffered(10)
         // Try to update the DB with the connection data
         .try_for_each_concurrent(5, |site| async move {
-            sqlx::query_as!(
-                SiteFactModel,
+            // Insert new timestamp data into DB
+            sqlx::query!(
                 r#"INSERT INTO site_fact(
                         site,
                         tstamp,
@@ -121,13 +123,28 @@ async fn connect_sites(
             )
             .execute(pool)
             .await?;
+            // Insert/update site data into DB
+            sqlx::query!(
+                r#"INSERT INTO site(
+                        site,
+                        name
+                    )
+                    VALUES ($1, $2)
+                    ON CONFLICT (site)
+                    DO UPDATE
+                        SET site = $1, name =$2"#,
+                site.site,
+                site.name,
+            )
+            .execute(pool)
+            .await?;
             Ok(())
         })
         .await
 }
 
 async fn render_page(
-    sites: &Vec<String>,
+    sites: &Vec<SiteModel>,
     page: &RwLock<String>,
     pool: &PgPool,
 ) -> Result<(), UptimersError> {
@@ -136,6 +153,7 @@ async fn render_page(
         SiteStatModel,
         r#"SELECT
             t1.site,
+            t3.name,
             t1.tstamp,
             t1.success,
             t1.status_code,
@@ -163,8 +181,20 @@ async fn render_page(
                 site
         ) t2
         ON
-            t1.site = t2.site;"#,
-        sites,
+            t1.site = t2.site
+        INNER JOIN (
+            SELECT
+                site,
+                name
+            FROM
+                site
+        ) t3
+        ON
+            t1.site = t3.site;"#,
+        &sites
+            .into_iter()
+            .map(|site| site.site.clone())
+            .collect::<Vec<_>>(),
     )
     .fetch_all(pool)
     .await?;
@@ -229,9 +259,7 @@ async fn main() -> Result<(), UptimersError> {
     Ok(HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
-            .app_data(sites.clone())
             .app_data(page.clone())
-            .app_data(web::Data::new(pool.clone()))
             .service(index_handler)
     })
     .bind(("0.0.0.0", 8080))?

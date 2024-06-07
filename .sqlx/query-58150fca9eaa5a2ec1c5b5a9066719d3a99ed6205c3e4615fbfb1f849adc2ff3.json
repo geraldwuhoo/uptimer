@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO site(\n                        site,\n                        name\n                    )\n                    VALUES ($1, $2)\n                    ON CONFLICT (site)\n                    DO UPDATE\n                        SET site = $1, name =$2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "58150fca9eaa5a2ec1c5b5a9066719d3a99ed6205c3e4615fbfb1f849adc2ff3"
+}

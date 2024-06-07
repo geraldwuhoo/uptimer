@@ -1,3 +1,5 @@
 sites:
-- https://example.com
-- https://fake
+- site: https://example.com
+  name: Example
+- site: https://fake
+  name: Fake
