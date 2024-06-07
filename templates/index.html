@@ -17,6 +17,12 @@
 
         a {
             color: #000;
+            text-decoration: none;
+            transition: 0.25s ease;
+        }
+
+        a:hover {
+            opacity: 0.7;
         }
 
         .button {
@@ -45,11 +51,13 @@
     </header>
     <main>
         {% for site in sites -%}
-        <p>
-            {% let percent = "{:.2}%"|format(100.0 * site.avg.unwrap_or_default()) -%}
-            <span class="button {% if site.success %}green{% else %}red{% endif %}">{{ percent }}</span>
-            <a href="{{ site.site }}">{{ site.name }}</a>
-        </p>
+        <a href="{{ site.site }}">
+            <p>
+                {% let percent = "{:.2}%"|format(100.0 * site.avg.unwrap_or_default()) -%}
+                <span class="button {% if site.success %}green{% else %}red{% endif %}">{{ percent }}</span>
+                {{ site.name }}
+            </p>
+        </a>
         {% endfor -%}
     </main>
 </body>
