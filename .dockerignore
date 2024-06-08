@@ -4,5 +4,9 @@
 !templates/**
 !migrations/**
 !.sqlx/**
+!go/go.mod
+!go/go.sum
+!go/*.go
+!build.rs
 !Cargo.toml
 !Cargo.lock

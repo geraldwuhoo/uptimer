@@ -1,9 +1,15 @@
+# build shoutrrr library
+FROM docker.io/library/golang:1.22.4-bookworm AS lib
+WORKDIR /usr/src/app
+
+COPY go/go.mod go/go.sum ./
+RUN go mod download && go mod verify
+
+COPY go/*.go .
+RUN CGO_ENABLED=1 go build -v -ldflags '-s -w -linkmode external -extldflags "static"' -trimpath -buildmode=c-archive -o libshoutrrr.a shoutrrr.go
+
 # chef
 FROM docker.io/library/rust:1.78.0 AS chef
-RUN rustup target add x86_64-unknown-linux-musl && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends musl-tools=1.2.3-1 musl-dev=1.2.3-1 && \
-    rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef
 WORKDIR /usr/src
 
@@ -15,14 +21,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 # Builder
 FROM chef AS builder
 COPY --from=planner /usr/src/recipe.json recipe.json
+RUN cargo chef cook --release --target x86_64-unknown-linux-gnu --recipe-path recipe.json
 
-RUN cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
 COPY . .
-RUN cargo build --release --target x86_64-unknown-linux-musl --bin uptimers
+COPY --from=lib /usr/src/app/libshoutrrr.a /usr/src/app/libshoutrrr.h ./go/
+RUN cargo build --release --target x86_64-unknown-linux-gnu --bin uptimers
 
 # Clean image
-FROM scratch
-COPY --from=builder /usr/src/target/x86_64-unknown-linux-musl/release/uptimers /usr/bin/uptimers
-COPY --from=builder /usr/lib/ssl/ /usr/local/ssl/
-COPY --from=builder /etc/ssl/ /etc/ssl/
+FROM gcr.io/distroless/cc-debian12@sha256:388145607c79313a1e49b783a7ee71e4ef3df31d87c45adb46bfb9b257b643d1
+COPY --from=builder /usr/src/target/x86_64-unknown-linux-gnu/release/uptimers /usr/bin/uptimers
 ENTRYPOINT ["uptimers"]
