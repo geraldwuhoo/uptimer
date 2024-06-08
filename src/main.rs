@@ -65,9 +65,11 @@ async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpResponse, 
     Ok(HttpResponse::Ok().content_type("text/html").body(page))
 }
 
-async fn connect_site(client: &Client, url: &str, shoutrrr_url: &str) -> StatusCode {
+async fn connect_site(client: &Client, site: &SiteModel, shoutrrr_url: &str) -> StatusCode {
     let mut status_code = StatusCode::BAD_GATEWAY;
     let max_attempts = 5;
+    let url = site.site.as_str();
+
     for attempt in 0..max_attempts {
         match client
             .get(url)
@@ -90,14 +92,18 @@ async fn connect_site(client: &Client, url: &str, shoutrrr_url: &str) -> StatusC
                     max_attempts
                 );
 
-                // Sleep and try again if we're not on the last attempt, else send a downtime notification
+                // Sleep and try again if we're not on the last attempt
                 if attempt + 1 < max_attempts {
                     sleep(Duration::from_secs(attempt + 1)).await;
-                } else if let Err(e) = notify(shoutrrr_url, format!("{} down", url)) {
-                    error!("Failed to send notification to shoutrrr: {}", e);
                 }
             }
         };
+    }
+
+    if !status_code.is_success() {
+        if let Err(e) = notify(shoutrrr_url, format!("{} down: {}", site.name, status_code)) {
+            error!("Failed to send notification to shoutrrr: {}", e);
+        }
     }
     status_code
 }
@@ -122,7 +128,7 @@ async fn connect_sites(
         .map(|site| async move {
             let url = &site.site;
             debug!("Attempting to connect to {}", url);
-            let status_code = connect_site(client, url, shoutrrr_url).await;
+            let status_code = connect_site(client, site, shoutrrr_url).await;
             Ok::<SiteFullModel, UptimersError>(SiteFullModel {
                 site: url.to_string(),
                 name: site.name.clone(),
