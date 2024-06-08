@@ -19,6 +19,15 @@ pub enum UptimersError {
 
     #[error("serde_yaml error\n{0}")]
     SerdeYaml(#[from] serde_yaml::Error),
+
+    #[error("utf8 error \n{0}")]
+    Utf8(#[from] std::str::Utf8Error),
+
+    #[error("nul error \n{0}")]
+    Nul(#[from] std::ffi::NulError),
+
+    #[error("other error \n{0}")]
+    Other(String),
 }
 
 impl actix_web::error::ResponseError for UptimersError {}

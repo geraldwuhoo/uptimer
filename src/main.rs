@@ -10,6 +10,7 @@ use log::{debug, error, info, warn};
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use sqlx::{postgres::PgPoolOptions, PgPool};
+use structures::shoutrrr::notify;
 
 use crate::structures::{
     errors::UptimersError,
@@ -41,6 +42,10 @@ struct Args {
     #[arg(long, env, default_value = "uptimers")]
     postgres_db: String,
 
+    /// Shoutrrr URL
+    #[arg(long, env)]
+    shoutrrr_url: String,
+
     /// path to config file
     #[arg(long, env, default_value = "./config.yaml")]
     config_path: String,
@@ -53,14 +58,14 @@ struct IndexTemplate {
 }
 
 #[get("/")]
-pub async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpResponse, UptimersError> {
+async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpResponse, UptimersError> {
     debug!("Acquiring read lock on the shared pre-generated page");
     let page = (*page.read().unwrap()).clone();
     debug!("Acquired read lock");
     Ok(HttpResponse::Ok().content_type("text/html").body(page))
 }
 
-async fn connect_site(client: &Client, url: &String) -> StatusCode {
+async fn connect_site(client: &Client, url: &str, shoutrrr_url: &str) -> StatusCode {
     let mut status_code = StatusCode::BAD_GATEWAY;
     let max_attempts = 5;
     for attempt in 0..max_attempts {
@@ -84,8 +89,12 @@ async fn connect_site(client: &Client, url: &String) -> StatusCode {
                     attempt + 1,
                     max_attempts
                 );
+
+                // Sleep and try again if we're not on the last attempt, else send a downtime notification
                 if attempt + 1 < max_attempts {
                     sleep(Duration::from_secs(attempt + 1)).await;
+                } else if let Err(e) = notify(shoutrrr_url, format!("{} down", url)) {
+                    error!("Failed to send notification to shoutrrr: {}", e);
                 }
             }
         };
@@ -97,6 +106,7 @@ async fn connect_sites(
     sites: &Vec<SiteModel>,
     client: &Client,
     pool: &PgPool,
+    shoutrrr_url: &str,
 ) -> Result<(), UptimersError> {
     // Truncate the current timestamp to minute accuracy
     let now = time::OffsetDateTime::now_utc()
@@ -112,7 +122,7 @@ async fn connect_sites(
         .map(|site| async move {
             let url = &site.site;
             debug!("Attempting to connect to {}", url);
-            let status_code = connect_site(client, url).await;
+            let status_code = connect_site(client, url, shoutrrr_url).await;
             Ok::<SiteFullModel, UptimersError>(SiteFullModel {
                 site: url.to_string(),
                 name: site.name.clone(),
@@ -249,7 +259,8 @@ async fn main() -> Result<(), UptimersError> {
 
     // web::Data and PgPool use Arc internally, so clones are cheap and usage is threadsafe
     let sites = web::Data::new(config.sites);
-    let page = web::Data::new(RwLock::new("".to_string())); // Pass around a pre-rendered template rather than rendering on every request
+    // Pass around a pre-rendered template rather than rendering on every request
+    let page = web::Data::new(RwLock::new("".to_string()));
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&format!(
@@ -267,7 +278,7 @@ async fn main() -> Result<(), UptimersError> {
         let pool = pool.clone();
         async move {
             loop {
-                if let Err(e) = connect_sites(&sites, &client, &pool).await {
+                if let Err(e) = connect_sites(&sites, &client, &pool, &args.shoutrrr_url).await {
                     error!("Failed to get site status: {}", e);
                 };
 

@@ -35,6 +35,10 @@
           sqlx-cli
           cargo-audit
           cargo-watch
+          go
+          gotools
+          gopls
+          golint
           pre-commit
           hadolint
         ];
