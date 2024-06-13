@@ -30,7 +30,7 @@ variables:
 .lint:
   extends: .cache
   stage: lint
-  image: docker.io/library/rust:1.78.0
+  image: docker.io/library/rust:1.79.0
   before_script:
     - cargo version
     - rustup component add clippy
@@ -95,7 +95,7 @@ dependencies:libs:
 .build_binary:
   extends: .cache
   stage: build
-  image: docker.io/library/rust:1.78.0
+  image: docker.io/library/rust:1.79.0
   needs:
     - lint:clippy
     - lint:format
