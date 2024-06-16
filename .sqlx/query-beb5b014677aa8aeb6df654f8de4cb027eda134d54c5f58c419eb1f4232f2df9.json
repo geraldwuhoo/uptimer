@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            site,\n            tstamp,\n            success,\n            status_code\n        FROM site_fact s1\n        WHERE\n            tstamp = (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)\n        AND site = $1;",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "site",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "tstamp",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "success",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "status_code",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "beb5b014677aa8aeb6df654f8de4cb027eda134d54c5f58c419eb1f4232f2df9"
+}

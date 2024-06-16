@@ -14,7 +14,7 @@ use structures::shoutrrr::notify;
 
 use crate::structures::{
     errors::UptimersError,
-    model::{SiteFullModel, SiteModel, SiteStatModel},
+    model::{SiteFactModel, SiteFullModel, SiteModel, SiteStatModel},
 };
 
 #[derive(Debug, Deserialize)]
@@ -68,8 +68,9 @@ async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpResponse, 
 async fn connect_site(
     client: &Client,
     site: &SiteModel,
+    pool: &PgPool,
     shoutrrr_url: &Option<String>,
-) -> StatusCode {
+) -> Result<StatusCode, UptimersError> {
     let mut status_code = StatusCode::BAD_GATEWAY;
     let max_attempts = 5;
     let url = site.site.as_str();
@@ -104,14 +105,42 @@ async fn connect_site(
         };
     }
 
+    let site_fact = sqlx::query_as!(
+        SiteFactModel,
+        r#"SELECT
+            site,
+            tstamp,
+            success,
+            status_code
+        FROM site_fact s1
+        WHERE
+            tstamp = (SELECT MAX(tstamp) FROM site_fact s2 WHERE s1.site = s2.site)
+        AND site = $1;"#,
+        site.site
+    )
+    .fetch_optional(pool)
+    .await?;
+    let previous_success = site_fact.map_or_else(|| true, |site| site.success);
+    let current_success = status_code.is_success();
+    debug!(
+        "Previous success: {}, Current success: {}",
+        previous_success, current_success
+    );
+
     if let Some(shoutrrr_url) = shoutrrr_url {
-        if !status_code.is_success() {
-            if let Err(e) = notify(shoutrrr_url, format!("{} down: {}", site.name, status_code)) {
+        if previous_success != current_success {
+            let msg = if current_success {
+                format!("🟢 {} up: {}", site.name, status_code)
+            } else {
+                format!("🔴 {} down: {}", site.name, status_code)
+            };
+
+            if let Err(e) = notify(shoutrrr_url, msg) {
                 error!("Failed to send notification to shoutrrr: {}", e);
             }
         }
     }
-    status_code
+    Ok(status_code)
 }
 
 async fn connect_sites(
@@ -134,7 +163,7 @@ async fn connect_sites(
         .map(|site| async move {
             let url = &site.site;
             debug!("Attempting to connect to {}", url);
-            let status_code = connect_site(client, site, shoutrrr_url).await;
+            let status_code = connect_site(client, site, pool, shoutrrr_url).await?;
             Ok::<SiteFullModel, UptimersError>(SiteFullModel {
                 site: url.to_string(),
                 name: site.name.clone(),
