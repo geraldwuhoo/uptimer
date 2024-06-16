@@ -44,7 +44,7 @@ struct Args {
 
     /// Shoutrrr URL
     #[arg(long, env)]
-    shoutrrr_url: String,
+    shoutrrr_url: Option<String>,
 
     /// path to config file
     #[arg(long, env, default_value = "./config.yaml")]
@@ -65,7 +65,11 @@ async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpResponse, 
     Ok(HttpResponse::Ok().content_type("text/html").body(page))
 }
 
-async fn connect_site(client: &Client, site: &SiteModel, shoutrrr_url: &str) -> StatusCode {
+async fn connect_site(
+    client: &Client,
+    site: &SiteModel,
+    shoutrrr_url: &Option<String>,
+) -> StatusCode {
     let mut status_code = StatusCode::BAD_GATEWAY;
     let max_attempts = 5;
     let url = site.site.as_str();
@@ -100,9 +104,11 @@ async fn connect_site(client: &Client, site: &SiteModel, shoutrrr_url: &str) -> 
         };
     }
 
-    if !status_code.is_success() {
-        if let Err(e) = notify(shoutrrr_url, format!("{} down: {}", site.name, status_code)) {
-            error!("Failed to send notification to shoutrrr: {}", e);
+    if let Some(shoutrrr_url) = shoutrrr_url {
+        if !status_code.is_success() {
+            if let Err(e) = notify(shoutrrr_url, format!("{} down: {}", site.name, status_code)) {
+                error!("Failed to send notification to shoutrrr: {}", e);
+            }
         }
     }
     status_code
@@ -112,7 +118,7 @@ async fn connect_sites(
     sites: &Vec<SiteModel>,
     client: &Client,
     pool: &PgPool,
-    shoutrrr_url: &str,
+    shoutrrr_url: &Option<String>,
 ) -> Result<(), UptimersError> {
     // Truncate the current timestamp to minute accuracy
     let now = time::OffsetDateTime::now_utc()
