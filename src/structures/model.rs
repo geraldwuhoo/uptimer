@@ -9,7 +9,7 @@ pub struct SiteModel {
 }
 
 #[derive(Debug, sqlx::FromRow)]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, dead_code)]
 pub struct SiteFactModel {
     pub site: String,
     pub tstamp: time::OffsetDateTime,
@@ -28,7 +28,7 @@ pub struct SiteFullModel {
 }
 
 #[derive(Debug, sqlx::FromRow)]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, dead_code)]
 pub struct SiteStatModel {
     pub site: String,
     pub name: String,
