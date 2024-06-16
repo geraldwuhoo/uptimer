@@ -301,7 +301,9 @@ async fn main() -> Result<(), UptimersError> {
     // web::Data and PgPool use Arc internally, so clones are cheap and usage is threadsafe
     let sites = web::Data::new(config.sites);
     // Pass around a pre-rendered template rather than rendering on every request
-    let page = web::Data::new(RwLock::new("".to_string()));
+    let page = web::Data::new(RwLock::new(
+        "Initial launch, please wait a few seconds...".to_string(),
+    ));
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&format!(
