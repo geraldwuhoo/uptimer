@@ -33,6 +33,7 @@
           pkg-config
           openssl
           sqlx-cli
+          postgresql
           cargo-audit
           cargo-watch
           go
