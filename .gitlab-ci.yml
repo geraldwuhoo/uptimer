@@ -120,7 +120,7 @@ dependencies:libs:
 build:container:
   stage: build
   image:
-    name: quay.io/buildah/stable:v1.37.1
+    name: quay.io/buildah/stable:v1.37.3
   variables:
     STORAGE_DRIVER: vfs
     BUILDAH_FORMAT: docker
