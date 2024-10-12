@@ -26,6 +26,14 @@ struct Config {
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Address to listen on
+    #[arg(long, env, default_value = "0.0.0.0")]
+    bind_address: String,
+
+    /// Port to listen on
+    #[arg(long, env, default_value_t = 8080)]
+    bind_port: u16,
+
     /// Postgres username
     #[arg(long, env, default_value = "uptimers")]
     postgres_username: String,
@@ -340,7 +348,7 @@ async fn main() -> Result<(), UptimersError> {
             .app_data(page.clone())
             .service(index_handler)
     })
-    .bind(("0.0.0.0", 8080))?
+    .bind((args.bind_address, args.bind_port))?
     .run()
     .await?)
 }
