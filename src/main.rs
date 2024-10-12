@@ -73,6 +73,14 @@ async fn index_handler(page: web::Data<RwLock<String>>) -> Result<HttpResponse, 
     Ok(HttpResponse::Ok().content_type("text/html").body(page))
 }
 
+async fn garbage_collect(pool: &PgPool) -> Result<(), UptimersError> {
+    let result = sqlx::query!("DELETE FROM site_fact WHERE tstamp < now() - interval '31 day'")
+        .execute(pool)
+        .await?;
+    debug!("Garbage collected {} rows", result.rows_affected());
+    Ok(())
+}
+
 async fn connect_site(
     client: &Client,
     site: &SiteModel,
@@ -335,6 +343,10 @@ async fn main() -> Result<(), UptimersError> {
 
                 if let Err(e) = render_page(&sites, &page, &pool).await {
                     error!("Failed to render status page: {}", e);
+                };
+
+                if let Err(e) = garbage_collect(&pool).await {
+                    error!("Failed to garbage collect: {}", e);
                 };
 
                 sleep(Duration::from_secs(60)).await;

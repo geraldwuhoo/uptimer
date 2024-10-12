@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM site_fact WHERE tstamp < now() - interval '31 day'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "acedfff7bca49358a53577d8eb464215e6ca1da5462331446fd57dc678eb072a"
+}
