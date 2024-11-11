@@ -16,7 +16,7 @@ reqwest = "0.12.4"
 serde = { version = "1.0.203", features = ["derive"] }
 serde_yaml = "0.9.34"
 sqlx = { version = "0.8.0", features = ["postgres", "runtime-tokio", "time", "tls-native-tls"] }
-thiserror = "1.0.61"
+thiserror = "2.0.0"
 time = { version = "0.3.36", features = ["parsing"] }
 
 [profile.release]
