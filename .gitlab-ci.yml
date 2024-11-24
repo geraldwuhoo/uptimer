@@ -118,10 +118,18 @@ dependencies:libs:
     paths:
       - ${CI_PROJECT_NAME}_x86_64-unknown-linux-gnu
 
-build:container:
+build:binary:gnu:
+  extends:
+    - .build_binary:gnu
+    - .non-release
+
+build:binary:gnu:release:
+  extends:
+    - .build_binary:gnu
+    - .release
+
+.build:container:
   stage: build
-  tags:
-    - ${TARGET_ARCH}
   image:
     name: gcr.io/kaniko-project/executor:v1.23.2-debug
     entrypoint: [""]
@@ -138,34 +146,37 @@ build:container:
       --cache-repo "${CI_REGISTRY_IMAGE}/build-cache-${TARGET_ARCH}"
       --cache-ttl 168h0m0s
       --context "${CI_PROJECT_DIR}"
-      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --dockerfile "${CI_PROJECT_DIR}/${DOCKERFILE}"
       --destination=image
       --no-push
       --tarPath image-${TARGET_ARCH}.tar
   artifacts:
     untracked: false
     expire_in: 1 day
-    paths:
-      - image-${TARGET_ARCH}.tar
     when: on_success
   needs:
     - lint:clippy
     - lint:format
-  parallel: &parallel
-    matrix:
-      - TARGET_ARCH:
-          - amd64
-          - arm64
 
-build:binary:gnu:
-  extends:
-    - .build_binary:gnu
-    - .non-release
+build:container:amd64:
+  extends: .build:container
+  variables:
+    TARGET_ARCH: amd64
+    DOCKERFILE: Dockerfile
+  artifacts:
+    paths:
+      - image-amd64.tar
 
-build:binary:gnu:release:
-  extends:
-    - .build_binary:gnu
-    - .release
+build:container:arm64:
+  extends: .build:container
+  tags:
+    - arm64
+  variables:
+    TARGET_ARCH: arm64
+    DOCKERFILE: Dockerfile.arm
+  artifacts:
+    paths:
+      - image-arm64.tar
 
 .push:
   stage: push
@@ -173,9 +184,13 @@ build:binary:gnu:release:
     name: gcr.io/go-containerregistry/crane/debug:v0.15.2
     entrypoint: [""]
   needs:
-    - job: build:container
-      parallel: *parallel
-  parallel: *parallel
+    - build:container:amd64
+    - build:container:arm64
+  parallel: &parallel
+    matrix:
+      - TARGET_ARCH:
+          - amd64
+          - arm64
 
 push:
   extends: .push
