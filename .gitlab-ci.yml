@@ -143,6 +143,7 @@ build:binary:gnu:release:
       /kaniko/executor
       --registry-mirror "${DOCKERIO_MIRROR}"
       --cache=true
+      --cache-copy-layers=true
       --cache-repo "${CI_REGISTRY_IMAGE}/build-cache-${TARGET_ARCH}"
       --cache-ttl 168h0m0s
       --context "${CI_PROJECT_DIR}"

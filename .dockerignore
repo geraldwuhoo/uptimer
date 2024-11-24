@@ -10,3 +10,4 @@
 !build.rs
 !Cargo.toml
 !Cargo.lock
+!recipe.json
