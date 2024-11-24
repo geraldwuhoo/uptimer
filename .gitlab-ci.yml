@@ -123,34 +123,34 @@ build:container:
   tags:
     - ${TARGET_ARCH}
   image:
-    name: quay.io/buildah/stable:v1.38.0
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: [""]
   variables:
-    STORAGE_DRIVER: vfs
-    BUILDAH_FORMAT: docker
-    BUILDAH_ISOLATION: chroot
     CGO_ENABLED: 0
-  needs:
-    - lint:clippy
-    - lint:format
   before_script:
-    - echo "${CI_REGISTRY_PASSWORD}" | buildah login -u "${CI_REGISTRY_USER}" --password-stdin "${CI_REGISTRY}"
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
   script:
     - >-
-      buildah build
-      --layers
-      --cache-to "${CI_REGISTRY_IMAGE}/build-cache-${TARGET_ARCH}"
-      --cache-from "${CI_REGISTRY_IMAGE}/build-cache-${TARGET_ARCH}"
+      /kaniko/executor
+      --registry-mirror "${DOCKERIO_MIRROR}"
+      --cache=true
+      --cache-repo "${CI_REGISTRY_IMAGE}/build-cache-${TARGET_ARCH}"
       --cache-ttl 168h0m0s
-      --tag ${CI_PROJECT_NAME}
-      --file Dockerfile
-      .
-    - buildah push localhost/${CI_PROJECT_NAME} docker-archive:image-${TARGET_ARCH}.tar
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --destination=image
+      --no-push
+      --tarPath image-${TARGET_ARCH}.tar
   artifacts:
     untracked: false
     expire_in: 1 day
     paths:
       - image-${TARGET_ARCH}.tar
     when: on_success
+  needs:
+    - lint:clippy
+    - lint:format
   parallel: &parallel
     matrix:
       - TARGET_ARCH:
