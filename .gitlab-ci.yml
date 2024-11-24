@@ -3,6 +3,7 @@ stages:
   - dependencies
   - build
   - push
+  - finalize
   - release
 
 workflow:
@@ -119,6 +120,8 @@ dependencies:libs:
 
 build:container:
   stage: build
+  tags:
+    - ${TARGET_ARCH}
   image:
     name: quay.io/buildah/stable:v1.38.0
   variables:
@@ -135,19 +138,24 @@ build:container:
     - >-
       buildah build
       --layers
-      --cache-to "${CI_REGISTRY_IMAGE}/build-cache"
-      --cache-from "${CI_REGISTRY_IMAGE}/build-cache"
+      --cache-to "${CI_REGISTRY_IMAGE}/build-cache-${TARGET_ARCH}"
+      --cache-from "${CI_REGISTRY_IMAGE}/build-cache-${TARGET_ARCH}"
       --cache-ttl 168h0m0s
       --tag ${CI_PROJECT_NAME}
       --file Dockerfile
       .
-    - buildah push localhost/${CI_PROJECT_NAME} docker-archive:image.tar
+    - buildah push localhost/${CI_PROJECT_NAME} docker-archive:image-${TARGET_ARCH}.tar
   artifacts:
     untracked: false
     expire_in: 1 day
     paths:
-      - image.tar
+      - image-${TARGET_ARCH}.tar
     when: on_success
+  parallel: &parallel
+    matrix:
+      - TARGET_ARCH:
+          - amd64
+          - arm64
 
 build:binary:gnu:
   extends:
@@ -165,14 +173,16 @@ build:binary:gnu:release:
     name: gcr.io/go-containerregistry/crane/debug:v0.15.2
     entrypoint: [""]
   needs:
-    - build:container
+    - job: build:container
+      parallel: *parallel
+  parallel: *parallel
 
 push:
   extends: .push
   script:
     - crane auth login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
-    - crane push image.tar ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
-    - crane push image.tar ${CI_REGISTRY_IMAGE}:latest
+    - crane push image.tar ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}-${TARGET_ARCH}
+    - crane push image.tar ${CI_REGISTRY_IMAGE}:latest-${TARGET_ARCH}
   rules:
     - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
 
@@ -182,8 +192,64 @@ push:release:
     - .release
   script:
     - crane auth login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
-    - crane push image.tar ${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}
-    - crane push image.tar ${CI_REGISTRY_IMAGE}:stable
+    - crane push image.tar ${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}-${TARGET_ARCH}
+    - crane push image.tar ${CI_REGISTRY_IMAGE}:stable-${TARGET_ARCH}
+
+finalize-multi-arch:
+  stage: finalize
+  image:
+    name: mplatform/manifest-tool:alpine-v2.1.5
+    entrypoint: [""]
+  script:
+    - >-
+      /manifest-tool
+      --username ${CI_REGISTRY_USER}
+      --password ${CI_REGISTRY_PASSWORD}
+      push from-args
+      --platforms linux/amd64,linux/arm64/v8
+      --template ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}-ARCH
+      --target ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
+    - >-
+      /manifest-tool
+      --username ${CI_REGISTRY_USER}
+      --password ${CI_REGISTRY_PASSWORD}
+      push from-args
+      --platforms linux/amd64,linux/arm64/v8
+      --template ${CI_REGISTRY_IMAGE}:latest-ARCH
+      --target ${CI_REGISTRY_IMAGE}:latest
+  needs:
+    - job: push
+      parallel: *parallel
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH
+
+finalize-multi-arch:release:
+  extends:
+    - .release
+  stage: finalize
+  image:
+    name: mplatform/manifest-tool:alpine-v2.1.5
+    entrypoint: [""]
+  script:
+    - >-
+      /manifest-tool
+      --username ${CI_REGISTRY_USER}
+      --password ${CI_REGISTRY_PASSWORD}
+      push from-args
+      --platforms linux/amd64,linux/arm64/v8
+      --template ${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}-ARCH
+      --target ${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG}
+    - >-
+      /manifest-tool
+      --username ${CI_REGISTRY_USER}
+      --password ${CI_REGISTRY_PASSWORD}
+      push from-args
+      --platforms linux/amd64,linux/arm64/v8
+      --template ${CI_REGISTRY_IMAGE}:stable-ARCH
+      --target ${CI_REGISTRY_IMAGE}:stable
+  needs:
+    - job: push:release
+      parallel: *parallel
 
 release:
   extends: .release
@@ -192,6 +258,7 @@ release:
   needs:
     - build:binary:gnu:release
     - push:release
+    - finalize-multi-arch:release
   script:
     - echo "Creating release for $CI_COMMIT_TAG"
   release:
